@@ -1,7 +1,7 @@
 - project url: https://kqvjisvktfadoggphulj.supabase.co
 - api key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtxdmppc3ZrdGZhZG9nZ3BodWxqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA3OTA5ODAsImV4cCI6MjA2NjM2Njk4MH0.vlBhIPqq0k1AB6wMzc00llmKSzmWKO2xUN9QdoOdStc
 
-- password: U1eYPplMQa2ksaaM1YyT
+- password: U1eYPplMQa2ksaaM1YyT#
 
 ´´´Javascript
 import { createClient } from '@supabase/supabase-js'
