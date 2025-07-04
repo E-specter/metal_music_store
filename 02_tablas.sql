@@ -2,8 +2,9 @@
 -- Este script contiene la creación de tablas con soporte para PostGIS
 -- Ejecutar después de crear la extensión PostGIS (01_estructura.sql)
 
--- Habilitar PostGIS si no está activado (debería estar en 01_estructura.sql)
+-- Habilitar extensiones necesarias
 CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS uuid-ossp;
 
 -- Tabla de Roles (Control de acceso)
 CREATE TABLE roles (
@@ -16,6 +17,7 @@ CREATE TABLE roles (
 );
 
 -- Tabla de Ubicaciones (Optimizada con PostGIS)
+/* OBSOLETA
 CREATE TABLE ubicaciones (
   id_ubicacion SERIAL PRIMARY KEY,
   direccion_linea1 VARCHAR(255) NOT NULL,
@@ -29,13 +31,24 @@ CREATE TABLE ubicaciones (
   fecha_creacion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   fecha_actualizacion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
-
 -- Índice espacial para búsquedas geográficas
 CREATE INDEX idx_ubicaciones_coordenadas ON ubicaciones USING GIST(coordenadas);
+*/
+-- Tabla de Ubicaciones con JSONB
+CREATE TABLE ubicaciones (
+  id_ubicacion SERIAL PRIMARY KEY,
+  direccion JSONB NOT NULL,
+  coordenadas GEOMETRY(POINT, 4326), -- Coordenadas geográficas (lat/long)
+  fecha_creacion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  fecha_actualizacion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+-- Índice para búsquedas en campos específicos del JSONB
+CREATE INDEX idx_ubicaciones_direccion ON ubicaciones USING GIN (direccion);
 
 -- Tabla de Usuarios (Optimizada con referencia a ubicaciones)
 CREATE TABLE usuarios (
-  id_usuario SERIAL PRIMARY KEY,
+  id_usuario UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id_secuencial SERIAL UNIQUE,
   nombre_usuario VARCHAR(50) UNIQUE NOT NULL,
   correo_electronico VARCHAR(255) UNIQUE NOT NULL,
   contrasena_hash VARCHAR(255) NOT NULL,
@@ -43,7 +56,7 @@ CREATE TABLE usuarios (
   apellidos VARCHAR(100),
   telefono VARCHAR(20),
   id_ubicacion_principal INTEGER REFERENCES ubicaciones(id_ubicacion),
-  direcciones_adicionales JSONB DEFAULT '[]', -- Para múltiples direcciones
+  direcciones_adicionales JSONB DEFAULT '[]'::jsonb, -- Array de objetos JSON con la misma estructura que la tabla ubicaciones
   id_rol INTEGER NOT NULL REFERENCES roles(id_rol),
   esta_activo BOOLEAN DEFAULT TRUE,
   ultimo_acceso TIMESTAMP WITH TIME ZONE,
@@ -82,7 +95,8 @@ CREATE TABLE detalles_tecnicos_productos (
 
 -- Tabla de Productos (Optimizada con referencia a detalles técnicos)
 CREATE TABLE productos (
-  id_producto SERIAL PRIMARY KEY,
+  id_producto UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id_secuencial SERIAL UNIQUE,
   codigo_sku VARCHAR(50) UNIQUE NOT NULL,
   nombre VARCHAR(255) NOT NULL,
   descripcion TEXT,
@@ -102,7 +116,7 @@ CREATE TABLE productos (
 -- Tabla de Imágenes de Productos
 CREATE TABLE imagenes_productos (
   id_imagen SERIAL PRIMARY KEY,
-  id_producto INTEGER NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
+  id_producto UUID NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
   url_imagen VARCHAR(255) NOT NULL,
   texto_alternativo VARCHAR(255),
   es_principal BOOLEAN DEFAULT FALSE,
@@ -112,7 +126,8 @@ CREATE TABLE imagenes_productos (
 
 -- Tabla de Listas de Deseos
 CREATE TABLE listas_deseos (
-  id_lista_deseos SERIAL PRIMARY KEY,
+  id_lista_deseos UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id_secuencial SERIAL UNIQUE,
   id_usuario INTEGER NOT NULL REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
   nombre VARCHAR(100) NOT NULL,
   es_privada BOOLEAN DEFAULT TRUE,
@@ -124,15 +139,16 @@ CREATE TABLE listas_deseos (
 -- Tabla de Items en Listas de Deseos
 CREATE TABLE items_lista_deseos (
   id_item_lista_deseos SERIAL PRIMARY KEY,
-  id_lista_deseos INTEGER NOT NULL REFERENCES listas_deseos(id_lista_deseos) ON DELETE CASCADE,
-  id_producto INTEGER NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
+  id_lista_deseos UUID NOT NULL REFERENCES listas_deseos(id_lista_deseos) ON DELETE CASCADE,
+  id_producto UUID NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
   fecha_agregado TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(id_lista_deseos, id_producto)
 );
 
 -- Tabla de Carritos de Compras
 CREATE TABLE carritos_compras (
-  id_carrito SERIAL PRIMARY KEY,
+  id_carrito UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id_secuencial SERIAL UNIQUE,
   id_usuario INTEGER NOT NULL REFERENCES usuarios(id_usuario) ON DELETE CASCADE,
   fecha_creacion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   fecha_actualizacion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -142,8 +158,8 @@ CREATE TABLE carritos_compras (
 -- Tabla de Items en Carritos
 CREATE TABLE items_carrito (
   id_item_carrito SERIAL PRIMARY KEY,
-  id_carrito INTEGER NOT NULL REFERENCES carritos_compras(id_carrito) ON DELETE CASCADE,
-  id_producto INTEGER NOT NULL REFERENCES productos(id_producto),
+  id_carrito UUID NOT NULL REFERENCES carritos_compras(id_carrito) ON DELETE CASCADE,
+  id_producto UUID NOT NULL REFERENCES productos(id_producto),
   cantidad INTEGER NOT NULL CHECK (cantidad > 0),
   fecha_agregado TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(id_carrito, id_producto)
@@ -171,8 +187,9 @@ CREATE TABLE metodos_pago (
 
 -- Tabla de Pedidos (Optimizada con referencias normalizadas)
 CREATE TABLE pedidos (
-  id_pedido SERIAL PRIMARY KEY,
-  id_usuario INTEGER NOT NULL REFERENCES usuarios(id_usuario),
+  id_pedido UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id_secuencial SERIAL UNIQUE,
+  id_usuario UUID NOT NULL REFERENCES usuarios(id_usuario),
   numero_pedido VARCHAR(50) UNIQUE NOT NULL,
   id_estado INTEGER NOT NULL REFERENCES estados_pedido(id_estado),
   subtotal DECIMAL(10, 2) NOT NULL CHECK (subtotal > 0),
@@ -191,18 +208,22 @@ CREATE TABLE pedidos (
 -- Tabla de Direcciones de Pedido (Para historial de direcciones)
 CREATE TABLE direcciones_pedido (
   id_direccion_pedido SERIAL PRIMARY KEY,
-  id_pedido INTEGER NOT NULL REFERENCES pedidos(id_pedido) ON DELETE CASCADE,
+  id_pedido UUID NOT NULL REFERENCES pedidos(id_pedido) ON DELETE CASCADE,
   tipo_direccion VARCHAR(10) NOT NULL CHECK (tipo_direccion IN ('envio', 'facturacion')),
   id_ubicacion INTEGER REFERENCES ubicaciones(id_ubicacion),
-  datos_direccion JSONB NOT NULL, -- Copia de los datos en el momento del pedido
+  direccion JSONB NOT NULL, -- Estructura estandarizada: {linea1, linea2, ciudad, provincia, codigo_postal, pais, referencia}
+  coordenadas GEOMETRY(POINT, 4326), -- Copia de las coordenadas en el momento del pedido
   fecha_creacion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Índice para búsquedas en campos específicos del JSONB
+CREATE INDEX idx_direcciones_pedido_direccion ON direcciones_pedido USING GIN (direccion);
 
 -- Tabla de Items de Pedidos (Optimizada)
 CREATE TABLE items_pedido (
   id_item_pedido SERIAL PRIMARY KEY,
-  id_pedido INTEGER NOT NULL REFERENCES pedidos(id_pedido) ON DELETE CASCADE,
-  id_producto INTEGER NOT NULL REFERENCES productos(id_producto),
+  id_pedido UUID NOT NULL REFERENCES pedidos(id_pedido) ON DELETE CASCADE,
+  id_producto UUID NOT NULL REFERENCES productos(id_producto),
   cantidad INTEGER NOT NULL CHECK (cantidad > 0),
   precio_unitario DECIMAL(10, 2) NOT NULL CHECK (precio_unitario > 0),
   precio_total DECIMAL(10, 2) NOT NULL CHECK (precio_total > 0),
@@ -214,7 +235,7 @@ CREATE TABLE items_pedido (
 -- Tabla de Historial de Estados de Pedido (Para tracking completo)
 CREATE TABLE historial_estados_pedido (
   id_historial SERIAL PRIMARY KEY,
-  id_pedido INTEGER NOT NULL REFERENCES pedidos(id_pedido) ON DELETE CASCADE,
+  id_pedido UUID NOT NULL REFERENCES pedidos(id_pedido) ON DELETE CASCADE,
   id_estado INTEGER NOT NULL REFERENCES estados_pedido(id_estado),
   id_usuario INTEGER REFERENCES usuarios(id_usuario), -- Quién realizó el cambio
   notas TEXT,
@@ -224,7 +245,7 @@ CREATE TABLE historial_estados_pedido (
 -- Tabla de Historial de Precios (para análisis y auditoría)
 CREATE TABLE historial_precios (
   id_historial_precio SERIAL PRIMARY KEY,
-  id_producto INTEGER NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
+  id_producto UUID NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
   precio_anterior DECIMAL(10, 2) NOT NULL,
   precio_nuevo DECIMAL(10, 2) NOT NULL,
   modificado_por INTEGER REFERENCES usuarios(id_usuario),
@@ -235,7 +256,7 @@ CREATE TABLE historial_precios (
 -- Tabla de Inventario (registro detallado de movimientos)
 CREATE TABLE registro_inventario (
   id_registro SERIAL PRIMARY KEY,
-  id_producto INTEGER NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
+  id_producto UUID NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
   cambio_cantidad INTEGER NOT NULL,
   nueva_cantidad INTEGER NOT NULL,
   tipo_cambio VARCHAR(20) NOT NULL CHECK (
@@ -251,8 +272,8 @@ CREATE TABLE registro_inventario (
 -- Tabla de Reseñas de Productos
 CREATE TABLE resenas_productos (
   id_resena SERIAL PRIMARY KEY,
-  id_producto INTEGER NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
-  id_usuario INTEGER NOT NULL REFERENCES usuarios(id_usuario),
+  id_producto UUID NOT NULL REFERENCES productos(id_producto) ON DELETE CASCADE,
+  id_usuario UUID NOT NULL REFERENCES usuarios(id_usuario),
   calificacion SMALLINT NOT NULL CHECK (calificacion BETWEEN 1 AND 5),
   titulo VARCHAR(100),
   comentario TEXT,

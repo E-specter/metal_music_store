@@ -2,8 +2,8 @@
 -- Este script crea la base de datos y el usuario/rol principal.
 
 CREATE DATABASE metal_music_store
-    WITH ENCODING = 'UTF8'
-    LC_COLLATE = 'es_ES.UTF-8'
+    WITH ENCODING = 'UTF8',
+    LC_COLLATE = 'es_ES.UTF-8',
     LC_CTYPE = 'es_ES.UTF-8';
 
 --TUNNING DE LA BASE DE DATOS (metal_music_store)
@@ -31,13 +31,18 @@ CREATE EXTENSION pg_trgm;
 -- Instalación de pg_stat_statements: Monitoreo de consultas
 CREATE EXTENSION pg_stat_statements;
 
+-- Instalación de uuid-ossp: Generación de UUIDs
+CREATE EXTENSION uuid-ossp;
+
+-- Enmascaramiento de datos para reportes
+CREATE EXTENSION anon;
+
 
 -- 3. CONFIGURACIONES DE SEGURIDAD
 -- Forzar conexiones SSL
 ALTER ROLE metal_user SET ssl = 'require';
 
--- Enmascaramiento de datos para reportes
-CREATE EXTENSION anon;
+
 SECURITY LABEL FOR anon ON COLUMN usuarios.contrasena_hash 
 IS 'MASKED WITH VALUE NULL';
 
@@ -45,8 +50,14 @@ IS 'MASKED WITH VALUE NULL';
 
 -- Particionamiento de registros de auditoría
 CREATE TABLE auditoria_accesos (
-    ...
-) PARTITION BY RANGE (fecha_acceso);
+    id SERIAL PRIMARY KEY,
+    usuario VARCHAR(100),
+    accion VARCHAR(50),
+    tabla_afectada VARCHAR(100),
+    datos_anteriores JSONB,
+    datos_nuevos JSONB,
+    fecha_accion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+) PARTITION BY RANGE (fecha_accion);
 
 -- 5. CONFIGURACIONES DE MONITOREO
 

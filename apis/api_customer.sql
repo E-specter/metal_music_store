@@ -1,5 +1,5 @@
 -- Agregar a lista de deseos
-CREATE PROCEDURE api_customer.agregar_a_lista_deseos(
+CREATE PROCEDURE api_customer.  (
     _usuario_id INT,
     _producto_id INT,
     _nombre_lista VARCHAR(100) DEFAULT 'Principal'

@@ -1,33 +1,49 @@
 -- Productos visibles con paginación
 CREATE FUNCTION api_public.registrar_usuario(
-    _nombre_usuario VARCHAR(50),
-    _correo VARCHAR(255),
-    _contrasena TEXT,
-    _nombres VARCHAR(100),
-    _apellidos VARCHAR(100)
+  _nombre_usuario VARCHAR(50),
+  _correo VARCHAR(255),
+  _contrasena TEXT,
+  _nombres VARCHAR(100),
+  _apellidos VARCHAR(100)
 ) RETURNS INT AS $$
 DECLARE user_id INT;
 BEGIN
-    INSERT INTO usuarios(nombre_usuario, correo_electronico, contrasena_hash, nombres, apellidos, id_rol)
-    VALUES (_nombre_usuario, _correo, crypt(_contrasena, gen_salt('bf')), _nombres, _apellidos, 2) -- Rol 2 = Cliente
-    RETURNING id_usuario INTO user_id;
-    
-    RETURN user_id;
+INSERT INTO usuarios(
+    nombre_usuario,
+    correo_electronico,
+    contrasena_hash,
+    nombres,
+    apellidos,
+    id_rol
+  )
+VALUES (
+    _nombre_usuario,
+    _correo,
+    crypt(_contrasena, gen_salt('bf')),
+    _nombres,
+    _apellidos,
+    2
+  ) -- Rol 2 = Cliente
+RETURNING id_usuario INTO user_id;
+RETURN user_id;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Autenticar usuario
 CREATE FUNCTION api_public.autenticar_usuario(
-    _identificador VARCHAR(255), -- Puede ser email o nombre de usuario
-    _contrasena TEXT
-) RETURNS TABLE (id_usuario INT, rol VARCHAR) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT u.id_usuario, r.nombre_rol
-    FROM usuarios u
-    JOIN roles r ON u.id_rol = r.id_rol
-    WHERE (u.correo_electronico = _identificador OR u.nombre_usuario = _identificador)
-      AND u.contrasena_hash = crypt(_contrasena, u.contrasena_hash);
+  _identificador VARCHAR(255),
+  -- Puede ser email o nombre de usuario
+  _contrasena TEXT
+) RETURNS TABLE (id_usuario INT, rol VARCHAR) AS $$ BEGIN RETURN QUERY
+SELECT u.id_usuario,
+  r.nombre_rol
+FROM usuarios u
+  JOIN roles r ON u.id_rol = r.id_rol
+WHERE (
+    u.correo_electronico = _identificador
+    OR u.nombre_usuario = _identificador
+  )
+  AND u.contrasena_hash = crypt(_contrasena, u.contrasena_hash);
 END;
 $$ LANGUAGE plpgsql;
 
