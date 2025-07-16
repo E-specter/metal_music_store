@@ -8,6 +8,8 @@
 CREATE INDEX idx_productos_categoria ON productos(id_categoria);
 CREATE INDEX idx_productos_marca ON productos(marca);
 CREATE INDEX idx_productos_precio ON productos(precio);
+
+
 CREATE INDEX idx_productos_activos ON productos(esta_activo) WHERE esta_activo = TRUE;
 
 -- Índices para consultas de usuarios
@@ -155,3 +157,54 @@ FROM pedidos p
 GROUP BY
     DATE_TRUNC('month', p.fecha_creacion)
 ORDER BY mes DESC;
+
+
+
+-- AUDITORIAS
+-- Particionamiento de registros de auditoría
+CREATE TABLE auditoria_accesos (
+    id SERIAL PRIMARY KEY,
+    usuario VARCHAR(100),
+    accion VARCHAR(50),
+    tabla_afectada VARCHAR(100),
+    datos_anteriores JSONB,
+    datos_nuevos JSONB,
+    fecha_accion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+) PARTITION BY RANGE (fecha_accion);
+
+-- Función para actualizar fecha de actualización
+CREATE OR REPLACE FUNCTION public.actualizar_fecha_actualizacion()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.fecha_actualizacion = CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+
+------------------------------------------------------------
+-- Para búsqueda de productos
+CREATE INDEX idx_productos_busqueda ON productos USING gin(to_tsvector('spanish', nombre || ' ' || descripcion));
+CREATE INDEX idx_productos_activos ON productos(id_producto) WHERE esta_activo;
+
+-- Para búsqueda geográfica
+CREATE INDEX idx_ubicaciones_geo ON ubicaciones USING gist(coordenadas);
+
+-- Para autenticación
+CREATE INDEX idx_usuarios_auth ON usuarios(nombre_usuario, correo_electronico) WHERE esta_activo;
+
+CREATE TABLE seguridad.eventos_auditoria (
+  id_evento BIGSERIAL PRIMARY KEY,
+  tipo_evento VARCHAR(50) NOT NULL,
+  usuario_id UUID,
+  direccion_ip INET,
+  detalles JSONB,
+  fecha_evento TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE ROLE monitor WITH LOGIN PASSWORD 'monitor_pass';
+GRANT CONNECT ON DATABASE current_database() TO monitor;
+GRANT USAGE ON SCHEMA seguridad TO monitor;
+GRANT SELECT ON seguridad.eventos_auditoria TO monitor;
+
