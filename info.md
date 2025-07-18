@@ -540,3 +540,23 @@ Posibilidad de cálculo de rutas
 Representación estándar de ubicaciones
 ---
 
+# PROCEDIMIENTOS DE RESTAURACIÓN (Backups)
+## Fundamentos:
+Se crean backups de la base de datos cada vez que se realiza un cambio importante.
+### Copias de seguridad lógicas:
+- pg_dump: permite crear copia de seguridad de una base de datos (tablas, esquemas, datos...) en formato sql.
+- pg_dumpall: permite crear una copia de seguridad de todos los roles y esquemas de la base de datos en formato sql.
+### Copias de seguridad físicas:
+- pg_basebackup: permite crear una copia de seguridad de la base de datos en formato binario.
+  - requiere que la base de datos esté en un estado coherente, en ejecución o detenida.
+## Tipos de copias de seguridad
+- Completa: Copia de datos y metadatos de una base de datos o cluster
+- Incremental: Copia de datos y metadatos de una base de datos o cluster desde la última copia de seguridad
+- Periódica: Copia de datos y metadatos de una base de datos o cluster en intervalos de tiempo definidos
+## Estrategias y recomendaciones
+Tener en cuenta
+- Las necesidades
+- El tamaño de la base de datos
+- requisitos del cumplimiento
+- 
+Actualizaciones semanales: 

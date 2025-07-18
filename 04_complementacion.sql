@@ -1,165 +1,81 @@
--- Enmascaramiento de datos
+-- Cleaned SQL Indices and Views for metal_music_store
 
-SECURITY LABEL FOR anon ON COLUMN usuarios.contrasena_hash IS 'MASKED WITH VALUE NULL';
+-- INDICES (Remove Duplicates)
+CREATE INDEX IF NOT EXISTS idx_productos_categoria ON productos(id_categoria);
+CREATE INDEX IF NOT EXISTS idx_productos_marca ON productos(marca);
+CREATE INDEX IF NOT EXISTS idx_productos_precio ON productos(precio);
+CREATE INDEX IF NOT EXISTS idx_productos_activos ON productos(esta_activo) WHERE esta_activo = TRUE;
 
--- Restringir acceso a datos sensibles
-ALTER TABLE usuarios ENABLE ROW LEVEL SECURITY;
--- Solo admins ven todos los usuarios
-CREATE POLICY admin_access ON usuarios
-    USING (current_user = 'admin' OR id_usuario = (SELECT id_usuario FROM usuarios WHERE nombre_usuario = current_user));
+CREATE INDEX IF NOT EXISTS idx_usuarios_correo ON usuarios(correo_electronico);
+CREATE INDEX IF NOT EXISTS idx_usuarios_rol ON usuarios(id_rol);
 
-    
--- Auditoria
--- Habilitar auditoría en postgresql.conf
-pgaudit.log = 'all, -misc'
-pgaudit.log_relation = on
+CREATE INDEX IF NOT EXISTS idx_pedidos_usuario ON pedidos(id_usuario);
+CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON pedidos(id_estado);
+CREATE INDEX IF NOT EXISTS idx_pedidos_fecha ON pedidos(fecha_creacion);
 
+CREATE INDEX IF NOT EXISTS idx_inventario_producto ON registro_inventario(id_producto);
+CREATE INDEX IF NOT EXISTS idx_inventario_fecha ON registro_inventario(fecha_cambio);
 
--- MONITOREO
-CREATE TABLE seguridad.eventos_auditoria (
-  id_evento BIGSERIAL PRIMARY KEY,
-  tipo_evento VARCHAR(50) NOT NULL,
-  usuario_id UUID,
-  direccion_ip INET,
-  detalles JSONB,
-  fecha_evento TIMESTAMPTZ DEFAULT NOW()
-);
+-- Full-text Search Index
+CREATE INDEX IF NOT EXISTS idx_productos_busqueda ON productos USING gin(to_tsvector('spanish', nombre || ' ' || descripcion));
 
-CREATE ROLE monitor WITH LOGIN PASSWORD 'monitor_pass';
-GRANT CONNECT ON DATABASE current_database() TO monitor;
-GRANT USAGE ON SCHEMA seguridad TO monitor;
-GRANT SELECT ON seguridad.eventos_auditoria TO monitor;
+-- Geographical Index
+CREATE INDEX IF NOT EXISTS idx_ubicaciones_geo ON ubicaciones USING gist(coordenadas);
 
+-- Authentication Index
+CREATE INDEX IF NOT EXISTS idx_usuarios_auth ON usuarios(nombre_usuario, correo_electronico) WHERE esta_activo;
 
--- =============================================
--- ROW LEVEL SECURITY (RLS) PARA TABLAS CRÍTICAS
--- =============================================
+-- VIEWS (Remove Duplicates)
+CREATE OR REPLACE VIEW productos_populares AS
+SELECT 
+    p.id_producto, 
+    p.nombre, 
+    p.precio, 
+    COUNT(ip.id_item_pedido) AS total_vendido
+FROM productos p
+LEFT JOIN items_pedido ip ON p.id_producto = ip.id_producto
+GROUP BY p.id_producto, p.nombre, p.precio
+ORDER BY total_vendido DESC;
 
--- Tabla de usuarios
-ALTER TABLE usuarios ENABLE ROW LEVEL SECURITY;
+CREATE OR REPLACE VIEW inventario_bajo AS
+SELECT 
+    id_producto, 
+    nombre, 
+    cantidad_disponible
+FROM productos
+WHERE cantidad_disponible < 10
+ORDER BY cantidad_disponible ASC;
 
--- Política para metal_user (acceso completo)
-CREATE POLICY metal_user_full_access ON usuarios
-  TO metal_user
-  USING (true) WITH CHECK (true);
+CREATE OR REPLACE VIEW resumen_ventas AS
+SELECT 
+    DATE_TRUNC('month', p.fecha_creacion) AS mes,
+    COUNT(DISTINCT p.id_pedido) AS total_pedidos,
+    SUM(p.total) AS ingresos_totales,
+    AVG(p.total) AS valor_promedio_pedido
+FROM pedidos p
+GROUP BY DATE_TRUNC('month', p.fecha_creacion)
+ORDER BY mes DESC;
 
--- Política para que los usuarios vean solo su propio perfil
-CREATE POLICY user_own_profile ON usuarios
-  FOR SELECT TO api_customer
-  USING (id_usuario = current_setting('app.current_user_id')::UUID);
+-- Utility Function for Updating Timestamps
+CREATE OR REPLACE FUNCTION public.actualizar_fecha_actualizacion()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.fecha_actualizacion = CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
--- Política para que los admins vean todos los usuarios
-CREATE POLICY admin_view_all_users ON usuarios
-  FOR SELECT TO api_admin
-  USING (true);
+-- Add timestamp column if missing
+ALTER TABLE pedidos 
+ADD COLUMN fecha_creacion TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
--- Política para actualización de propio perfil
-CREATE POLICY user_update_own_profile ON usuarios
-  FOR UPDATE TO api_customer
-  USING (id_usuario = current_setting('app.current_user_id')::UUID)
-  WITH CHECK (id_usuario = current_setting('app.current_user_id')::UUID);
-
--- Tabla de pedidos
-ALTER TABLE pedidos ENABLE ROW LEVEL SECURITY;
-
--- Política para clientes (solo sus pedidos)
-CREATE POLICY customer_own_orders ON pedidos
-  FOR ALL TO api_customer
-  USING (id_usuario = current_setting('app.current_user_id')::UUID)
-  WITH CHECK (id_usuario = current_setting('app.current_user_id')::UUID);
-
--- Política para admins (todos los pedidos)
-CREATE POLICY admin_all_orders ON pedidos
-  FOR ALL TO api_admin
-  USING (true) WITH CHECK (true);
-
--- Política para repartidores (solo pedidos en estados específicos)
-CREATE POLICY delivery_view_orders ON pedidos
-  FOR SELECT TO api_delivery
-  USING (id_estado IN (
-    SELECT id_estado FROM estados_pedido 
-    WHERE codigo_estado IN ('por_enviar', 'enviado')
-  ));
-
--- Tabla de productos
-ALTER TABLE productos ENABLE ROW LEVEL SECURITY;
-
--- Política para lectura pública de productos activos
-CREATE POLICY public_read_active_products ON productos
-  FOR SELECT TO api_public
-  USING (esta_activo);
-
--- Política para clientes (lectura completa)
-CREATE POLICY customer_read_products ON productos
-  FOR SELECT TO api_customer
-  USING (true);
-
--- Política para admins (control completo)
-CREATE POLICY admin_full_products ON productos
-  FOR ALL TO api_admin
-  USING (true) WITH CHECK (true);
-
--- Tabla de listas de deseos
-ALTER TABLE listas_deseos ENABLE ROW LEVEL SECURITY;
-
--- Política para dueños de listas
-CREATE POLICY owner_list_access ON listas_deseos
-  FOR ALL TO api_customer
-  USING (id_usuario = current_setting('app.current_user_id')::UUID)
-  WITH CHECK (id_usuario = current_setting('app.current_user_id')::UUID);
-
--- Política para listas públicas
-CREATE POLICY public_list_read ON listas_deseos
-  FOR SELECT TO api_public
-  USING (NOT es_privada);
-
--- Tabla de carritos de compra
-ALTER TABLE carritos_compras ENABLE ROW LEVEL SECURITY;
-
--- Política para dueños de carritos
-CREATE POLICY owner_cart_access ON carritos_compras
-  FOR ALL TO api_customer
-  USING (id_usuario = current_setting('app.current_user_id')::UUID)
-  WITH CHECK (id_usuario = current_setting('app.current_user_id')::UUID);
-
--- =============================================
--- SEGURIDAD PARA TABLAS DE AUDITORÍA
--- =============================================
-
--- Tabla historial_precios
-ALTER TABLE historial_precios ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY admin_read_price_history ON historial_precios
-  FOR SELECT TO api_admin
-  USING (true);
-
--- Tabla registro_inventario
-ALTER TABLE registro_inventario ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY admin_read_inventory_history ON registro_inventario
-  FOR SELECT TO api_admin
-  USING (true);
-
--- Tabla historial_estados_pedido
-ALTER TABLE historial_estados_pedido ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY customer_read_own_order_history ON historial_estados_pedido
-  FOR SELECT TO api_customer
-  USING (id_pedido IN (
-    SELECT id_pedido FROM pedidos 
-    WHERE id_usuario = current_setting('app.current_user_id')::UUID
-  ));
-
-CREATE POLICY admin_read_all_order_history ON historial_estados_pedido
-  FOR SELECT TO api_admin
-  USING (true);
-
-CREATE POLICY delivery_read_assigned_order_history ON historial_estados_pedido
-  FOR SELECT TO api_delivery
-  USING (id_pedido IN (
-    SELECT id_pedido FROM pedidos 
-    WHERE id_estado IN (
-      SELECT id_estado FROM estados_pedido 
-      WHERE codigo_estado IN ('por_enviar', 'enviado')
-    )
-  ));
+-- Update existing views
+CREATE OR REPLACE VIEW resumen_ventas AS
+SELECT 
+    DATE_TRUNC('month', p.fecha_creacion) AS mes,
+    COUNT(DISTINCT p.id_pedido) AS total_pedidos,
+    SUM(p.total) AS ingresos_totales,
+    AVG(p.total) AS valor_promedio_pedido
+FROM pedidos p
+GROUP BY DATE_TRUNC('month', p.fecha_creacion)
+ORDER BY mes DESC;
